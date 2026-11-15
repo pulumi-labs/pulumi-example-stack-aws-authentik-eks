@@ -1,0 +1,23 @@
+[project]
+name = "authentik-oidc-onboarding-aws"
+version = "0.1.0"
+description = "Private OIDC onboarding on existing EKS"
+requires-python = ">=3.12,<3.13"
+dependencies = ["pulumi==3.273.0", "pulumi-aws==7.52.1", "pulumi-kubernetes==4.34.2"]
+
+[tool.basedpyright]
+typeCheckingMode = "all"
+pythonVersion = "3.12"
+include = ["__main__.py", "settings.py", "data_services.py", "relying_party.py", "sample"]
+exclude = [".venv"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812", "ISC001", "D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

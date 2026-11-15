@@ -1,0 +1,16 @@
+name: authentik-oidc-onboarding-aws
+description: Private Authentik onboarding on existing EKS with RDS and S3
+runtime:
+  name: python
+  options:
+    virtualenv: .venv
+config:
+  authentik-oidc-onboarding-aws:disposable:
+    type: boolean
+    default: false
+  authentik-oidc-onboarding-aws:serverReplicas:
+    type: integer
+    default: 1
+  authentik-oidc-onboarding-aws:workerReplicas:
+    type: integer
+    default: 1
