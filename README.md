@@ -230,15 +230,17 @@ Upstream licenses are preserved under `licenses/`. Authentik core is MIT with
 separate enterprise terms; its Helm chart is GPL-3.0, including the unmodified
 chart source bundled here. Bundled Bitnami/common chart code is Apache-2.0 and
 disabled. oauth2-proxy is MIT. CPython uses PSF terms and Docker Python packaging
-is MIT. No authored-code license has been chosen; that decision and a named
-maintenance owner are prerequisites for public release.
+is MIT.
+
+This example's authored code is licensed under the [MIT License](LICENSE) and
+is provided as-is, without warranty or a support commitment. Third-party
+components retain their own licenses and notices.
 
 Private reviewers can use this repository's issues for example defects and submit
 pull requests with a description of the change and its impact. Never include
 credentials, state or private logs. Report sensitive findings privately to the
 repository administrators through your organization's approved security channel.
-Product support remains with the upstream projects. A named maintenance owner and
-support process still need review; this source has no public release or support SLA.
+Product support remains with the upstream projects.
 
 Official references:
 
