@@ -1,79 +1,136 @@
 # Authentik OIDC onboarding on Amazon EKS with Python Pulumi
 
-Deploy a private Authentik identity service and a working team onboarding portal
-on an existing EKS cluster in `us-east-2`. Pulumi connects encrypted RDS PostgreSQL,
-private S3 file storage, a scoped IRSA role, declarative users/application/client
-and a relying party protected by oauth2-proxy.
+This example deploys a private sign-in service and a small "team onboarding"
+web page that only approved people can open. It runs on a Kubernetes cluster
+you already have in AWS region `us-east-2`, and Pulumi (infrastructure as code
+written in Python) creates everything else.
 
-**Validation status, November 15, 2026:** deployed in an approved disposable AWS
-environment and deleted with independent resource cleanup checks. In separate
-clean Chrome profiles, Alice reached the protected checklist with HTTP 200 and
-all three items; Bob was denied application access and reached his authenticated
-Authentik user settings. Spoofed identity headers redirected to login, and actual
-pod binding and Services confirmed the backend was private.
+## What you'll build
 
-One acceptance assertion failed: the pinned upstream oauth2-proxy returns HTTP
-500 for a malformed callback state, rather than the required 4xx. It did not
-return the protected page. Persistence, scaling and recovery remain untested.
-This demonstration makes no production readiness or HA claim.
+When you're done, you'll have:
 
-## What runs
+- **Authentik**, an open source identity provider. It stores users and groups
+  and handles sign-in for other apps.
+- A **protected onboarding portal**. Users sign in through Authentik. Members
+  of the `onboarding-members` group see a first-day checklist, and everyone
+  else is turned away.
+- Two demo users: `alice`, who is in the group, and `bob`, who isn't.
 
-The official Authentik Helm chart runs one server and one worker. PostgreSQL stores
-identities, keys, sessions and background coordination; this release needs no Redis.
-RDS is private, encrypted, backed up for seven days and accessed using verified
-TLS with the included regional AWS CA bundle. S3 stores uploaded files privately
-using short-lived IRSA credentials, with encryption, versioning and public access
-blocked.
+A few terms you'll see throughout:
 
-The worker mounts `config/onboarding.yaml` during normal startup. This supported
-blueprint creates `alice`, `bob`, `onboarding-members`, an authorization-code-only
-confidential OIDC client and an application bound to that group. Only Alice is a
-member. Secrets arrive through worker environment references, not YAML literals.
-No bootstrap API token or additional provisioning command is required.
+- **EKS** (Amazon Elastic Kubernetes Service) is AWS's managed Kubernetes. This
+  example runs inside an EKS cluster you already have. It doesn't create one.
+- **RDS** (Amazon Relational Database Service) is AWS's managed database.
+  Authentik stores its data in an RDS PostgreSQL database.
+- **S3** is AWS object storage. Authentik keeps uploaded files there.
+- **IRSA** (IAM Roles for Service Accounts) lets one Kubernetes pod borrow an
+  AWS role through short-lived credentials, so nobody has to store AWS keys
+  inside the cluster.
+- **OIDC** (OpenID Connect) is the standard sign-in protocol that Authentik
+  speaks. An app sends you to Authentik, you sign in there, and Authentik sends
+  back a signed token that says who you are.
+- **Helm** is the Kubernetes package manager. A Helm "chart" is a packaged app.
+  This example installs the official Authentik chart.
+- **oauth2-proxy** is a small open source gateway that sits in front of a web
+  app and only lets signed-in, authorized users through.
 
-The sample pod contains upstream oauth2-proxy and `sample/portal.py`. The proxy
-performs OIDC discovery, signature/issuer/audience/nonce/state validation, PKCE
-S256 and group checks. The small Python page displays the authenticated identity
-and a first-day checklist. Its backend binds only `127.0.0.1:8080` inside the pod;
-only proxy port 4180 has a Service.
+## Validation status (November 15, 2026)
 
-This uses official blueprints rather than an AnyTF-generated Authentik provider:
-there is no long-lived elevated API token, generated SDK, API-to-Pulumi bootstrap
-cycle or second provisioning phase. Removing a blueprint file does not remove
-its objects. Selective offboarding uses blueprint `state: absent`; destroying
-this entire stack removes the instance holding its objects.
+This example was deployed in a disposable AWS test environment and then deleted,
+with separate checks confirming the resources were gone. Results:
 
-## Requirements
+- **Passed:** in separate clean Chrome profiles, Alice reached the protected
+  checklist with HTTP 200 and all three items. Bob was denied access to the
+  application and reached his own signed-in Authentik user settings instead.
+- **Passed:** spoofed identity headers were redirected to login, and the actual
+  pod binding and Kubernetes Services confirmed the backend was private.
+- **Failed:** one check didn't pass. The pinned upstream oauth2-proxy returns
+  **HTTP 500** for a malformed callback state, but the check required a **4xx**
+  response. It didn't return the protected page, but the result is still a
+  failure against the stated requirement.
+- **Not tested:** persistence, scaling and recovery.
 
-- Existing EKS with Linux AMD64 nodes, network access to private RDS subnets,
-  public container registries, S3 and regional STS HTTPS APIs.
-- Existing EKS IAM OIDC provider and IRSA support. The stack creates only its
-  workload role and service account, not shared cluster infrastructure.
-- Two or more existing private subnets spanning availability zones in the same
-  VPC, and the actual security group used by the cluster's nodes. If using
-  security groups for pods, adapt the database source to the actual pod group
-  before deployment; do not guess a source group.
-- Scoped AWS provisioning credentials, EKS namespace access, AWS CLI v2,
-  CPython 3.12, uv, Pulumi CLI 3.273.0 and providers AWS 7.52.1/Kubernetes 4.34.2.
-  The lock supports the reviewed ARM64 runner and adds canonical Linux AMD64 hashes.
-- A browser machine that can run loopback-only port-forwards to that cluster.
+So this is **not** a full pass, and it makes no production readiness or high
+availability (HA) claim.
 
-No Tailscale, operator, CSI driver, custom runner, cluster provisioning or
-workstation workload execution is part of this example. Review and scan the exact
-artifacts before running these commands in your approved execution environment.
+## How it works
 
-## Configure and deploy
+The official Authentik Helm chart runs one server and one worker. PostgreSQL
+stores identities, keys, sessions and background coordination. This Authentik
+release doesn't need Redis.
 
-Clone the private repository with an account that has access, then configure it
-in your approved execution environment:
+The RDS database is private and encrypted, keeps backups for seven days, and is
+reached over verified TLS using the included regional AWS certificate bundle.
+The S3 bucket is private, encrypted and versioned, with public access blocked.
+Authentik reaches it through short-lived IRSA credentials.
+
+Users, groups and the app are created by a **blueprint**, Authentik's built-in
+way to declare objects in a YAML file. The worker loads `config/onboarding.yaml`
+at normal startup. It creates `alice`, `bob`, `onboarding-members`, a
+confidential OIDC client that only allows the authorization code flow, and an
+application bound to that group. Only Alice is a member. Passwords and secrets
+reach the worker through environment references, never as literal values in the
+YAML. You don't need a bootstrap API token or any extra provisioning command.
+
+The sample pod holds two containers: upstream oauth2-proxy and
+`sample/portal.py`. The proxy does OIDC discovery, checks the token signature,
+issuer, audience, nonce and state, uses PKCE S256, and checks group membership.
+The small Python page then shows who you are and a first-day checklist. The
+Python backend listens only on `127.0.0.1:8080` inside the pod, and only the
+proxy's port 4180 has a Kubernetes Service.
+
+### Why blueprints instead of a Terraform provider
+
+Blueprints are an official Authentik feature. Using them avoids a long-lived
+admin API token, a generated SDK, and a second "set up the API, then configure
+it" phase. One thing to know: deleting a blueprint file doesn't delete the
+objects it created. To remove a single object, use blueprint `state: absent`.
+Destroying the whole stack removes the Authentik instance and everything in it.
+
+## Before you start
+
+You'll need these already in place:
+
+1. **An EKS cluster** in `us-east-2` with Linux AMD64 nodes. The nodes need
+   network access to private RDS subnets, public container registries, S3 and
+   the regional AWS STS HTTPS API.
+2. **An IAM OIDC provider for the cluster**, so IRSA works. The stack only
+   creates its own workload role and service account. It doesn't change shared
+   cluster setup.
+3. **Two or more private subnets** in different availability zones in the same
+   VPC as the cluster, plus the security group your nodes actually use. If your
+   cluster uses security groups for pods, change the database rule to use the
+   real pod security group before you deploy. Don't guess.
+4. **Tools:** AWS CLI v2, CPython 3.12, uv, Pulumi CLI 3.273.0, and the Pulumi
+   providers AWS 7.52.1 and Kubernetes 4.34.2. The dependency lock includes
+   hashes for Linux ARM64 and Linux AMD64.
+5. **Access:** AWS credentials scoped to create these resources, and permission
+   to manage a namespace in the cluster.
+6. **A browser machine** that can run `kubectl port-forward` to the cluster on
+   its own loopback address.
+
+You don't need Tailscale, a Kubernetes operator, a CSI driver, a custom CI
+runner, or a new cluster.
+
+**Safety first:** this deploys third-party software. Review and malware-scan the
+exact source, chart, dependency and container artifacts before you run
+anything, and run every command below in an isolated, disposable environment,
+not on your everyday workstation.
+
+## Step 1: Get the code
+
+The repository is private, so clone it with an account that has access:
 
 ```sh
 git clone https://github.com/pulumi-labs/pulumi-example-stack-aws-authentik-eks.git
 cd pulumi-example-stack-aws-authentik-eks
 ```
 
-From that directory:
+## Step 2: Install dependencies and create a stack
+
+From that directory, create a virtual environment from the hash-locked
+dependencies, then create a Pulumi stack (one deployment of this project) and
+point it at your cluster:
 
 ```sh
 uv venv --python 3.12 .venv
@@ -86,22 +143,32 @@ pulumi config set nodeSecurityGroupId "$EKS_NODE_SECURITY_GROUP_ID"
 pulumi config set privateSubnetIds "$PRIVATE_SUBNET_IDS"
 ```
 
-`PRIVATE_SUBNET_IDS` is a comma-separated list of subnet IDs, without spaces.
-Use a lowercase stack name of at most 24 characters. Set `AWS_PROFILE` or scoped
-temporary credential environment variables in the execution environment; do not
-place credentials in this directory. The generated kubeconfig uses AWS CLI
-`eks get-token`, the selected cluster's endpoint and its CA.
+A few notes:
 
-`resourcePrefix` optionally sets the namespace and prefixes owned IAM role,
-database, subnet group, security group and bucket names. It defaults to
-`authentik-<stack>` and accepts a lowercase DNS label up to 40 characters.
-Every taggable owned AWS
-resource receives `pulumi-project` and `pulumi-stack` through the explicit
-provider. Optional `permissionsBoundaryArn` applies to the application IAM role;
-an IAM boundary is not mandatory for ordinary product use.
+- `PRIVATE_SUBNET_IDS` is a comma-separated list of subnet IDs with no spaces.
+- Use a lowercase stack name of 24 characters or fewer.
+- Provide AWS credentials through `AWS_PROFILE` or scoped temporary credential
+  environment variables. Never put credentials in this directory.
+- The generated kubeconfig uses AWS CLI `eks get-token` with your cluster's
+  endpoint and certificate authority.
 
-Enter distinct, password-manager-generated secrets through interactive prompts.
-Each of the following must contain 32 to 128 URL-safe letters, digits, `_` or `-`:
+### Optional settings
+
+- `resourcePrefix` sets the namespace and the prefix for the IAM role,
+  database, subnet group, security group and bucket names. It defaults to
+  `authentik-<stack>` and accepts a lowercase DNS label of up to 40 characters.
+- `permissionsBoundaryArn` attaches an IAM permissions boundary to the
+  application role. It's not required for normal use.
+- `serverReplicas` and `workerReplicas` default to 1 and accept 1 through 4.
+
+Every AWS resource the stack owns that supports tags gets `pulumi-project` and
+`pulumi-stack` tags.
+
+## Step 3: Set the secrets
+
+Generate each of these with a password manager and make every one different.
+Each must be 32 to 128 characters made of URL-safe letters, digits, `_` or `-`.
+Pulumi prompts you for each value and stores it encrypted:
 
 ```sh
 pulumi config set --secret databasePassword
@@ -112,14 +179,21 @@ pulumi config set --secret bobPassword
 pulumi config set --secret clientSecret
 ```
 
-Keep Alice and Bob's values securely for the browser checks. `bootstrapPassword`
-initializes `akadmin` only at the first install. It is not a password-rotation
-mechanism. Keep `secretKey` unchanged across updates. The local users' passwords
-and the client secret are reconciled from configuration; changing them rolls the
-worker and proxy through secret-derived revision annotations.
+What each one is for:
 
-Set `cookieSecret` to the URL-safe base64 encoding of exactly 32 random bytes
-(44 characters including final `=`). For example, on a trusted execution host:
+- `alicePassword` and `bobPassword`: keep these somewhere safe. You'll need
+  them to sign in later.
+- `bootstrapPassword`: sets the `akadmin` admin password **only on the first
+  install**. Changing it later doesn't rotate the password.
+- `secretKey`: Authentik's internal key. Don't change it after deploying.
+- The user passwords and `clientSecret` are kept in sync with your config.
+  Changing them restarts the worker and proxy automatically.
+
+## Step 4: Preview and deploy
+
+Set `cookieSecret` to the URL-safe base64 form of exactly 32 random bytes (44
+characters, ending in `=`). On a trusted machine, this does it for you. Then
+preview and deploy:
 
 ```sh
 openssl rand -base64 32 | tr '+/' '-_' | pulumi config set --secret cookieSecret
@@ -127,24 +201,24 @@ pulumi preview --diff
 pulumi up
 ```
 
-Inspect the preview before applying it. RDS engine `17.7` and class
-`db.t4g.micro` must be available in the selected subnets/region. The stack creates
-no public ingress, load balancer, NodePort or public database.
-`serverReplicas` and `workerReplicas` default to 1 and accept 1 through 4.
-The sample has one replica and is not a production web framework.
+Read the preview before you confirm. RDS engine `17.7` and instance class
+`db.t4g.micro` must be available in your subnets and region. The stack creates
+no public ingress, load balancer, NodePort or public database. The sample app
+runs as a single replica and isn't a production web framework.
 
-## Use the protected portal
+## Step 5: Open the portal
 
-On the browser machine, `authentik.localhost` must resolve to `127.0.0.1`.
-Chromium treats `.localhost` names as loopback. If your resolver does not,
-configure that one hosts entry through your normal local administration process.
-Do not point it at a public address.
+The browser and the proxy must see Authentik at exactly the same hostname,
+`authentik.localhost`. On your browser machine it must resolve to `127.0.0.1`.
+Chromium already treats `.localhost` names as loopback. If your system doesn't,
+add that one hosts-file entry the way you normally would. Never point it at a
+public address.
 
-The issuer hostname must be identical from both browser and proxy. Pulumi inserts
-the dedicated issuer Service IP into the sample pod's hostAliases. This avoids
-disabling issuer validation or substituting an internal hostname in tokens.
+Inside the cluster, Pulumi adds the issuer Service IP to the sample pod's
+`hostAliases`, so the proxy sees the same name. That way nobody has to turn off
+issuer checks or swap in an internal hostname.
 
-In separate terminals, keep these attended forwards running:
+Open two terminals and leave these port-forwards running while you test:
 
 ```sh
 NS="$(pulumi stack output namespace)"
@@ -156,93 +230,115 @@ NS="$(pulumi stack output namespace)"
 kubectl -n "$NS" port-forward --address 127.0.0.1 svc/onboarding-sample 4180:4180
 ```
 
-1. Open `http://localhost:4180/` in a fresh browser profile. Sign in as `alice`
-   using the configured Alice password. Expect the first-day checklist and
-   `alice@onboarding.example.test`.
-2. Use a second, fresh profile with no existing IdP or application cookies.
-   Sign in as `bob` with the valid Bob password. Expect Authentik's access-denied
-   page; Bob is authenticated but lacks the application's allowed group.
-3. If needed, visit `http://authentik.localhost:9000/if/admin/` as `akadmin` to
-   inspect the application, provider, group binding and successful blueprint.
-   Do not copy Secrets, token responses or raw browser storage into evidence.
+## Step 6: Check that it works
 
-The email scope marks only these two administratively provisioned demo identities
-as verified; there is no enrollment or email-verification service here. Never
-reuse that scope mapping for arbitrary or self-enrolled production identities.
-The proxy also restricts the group and the reserved demo email domain.
+1. Open `http://localhost:4180/` in a fresh browser profile and sign in as
+   `alice` with Alice's password. **Success:** you see the first-day checklist
+   and `alice@onboarding.example.test`.
+2. Open a second fresh profile with no saved cookies. Sign in as `bob` with
+   Bob's password. **Success:** Bob cannot open the protected checklist. In the
+   recorded run he reached his own Authentik settings after the denial; he was
+   signed in but was not in the allowed group.
+3. Optionally, open `http://authentik.localhost:9000/if/admin/` and sign in as
+   `akadmin` to look at the application, provider, group binding and blueprint
+   status. Don't copy secrets, token responses or raw browser storage into notes
+   or tickets.
 
-Clearing the sample session does not clear the Authentik SSO session. Use a clean
-profile for the denied-user check, or explicitly log out of both applications.
-Sessions last five minutes; removing a group does not instantly revoke an existing
-proxy cookie. This example makes no immediate session revocation promise.
+Good to know:
 
-## Private demo versus production
+- The email scope marks only these two admin-created demo users as verified.
+  There's no sign-up or email verification here. Don't reuse that mapping for
+  real or self-registered users.
+- The proxy also limits access to the group and the reserved demo email domain.
+- Signing out of the portal doesn't sign you out of Authentik. Use a clean
+  profile for Bob, or log out of both.
+- Sessions last five minutes. Removing someone from the group doesn't kill a
+  proxy session they already have, and this example doesn't promise instant
+  revocation.
 
-HTTP endpoints and non-Secure proxy cookies are restricted to this attended
-loopback demonstration. Cluster networking is part of the trusted platform.
-Production requires HTTPS at a stable DNS origin accessible from browser and
-proxy, secure cookies, matching OIDC redirect/issuer and S3 CORS origins, reviewed
-network controls, MFA, backup/restore operations and capacity planning. This
-example does not implement or validate that production transition.
+## Moving toward production
 
-Kubernetes Secrets and encrypted Pulumi config keep secrets out of the source,
-but state, Helm records, pod environment access and admin APIs are sensitive.
-Do not export state or secret-bearing responses into Git. No bootstrap token is
-created; application pods receive no AWS provisioning identity.
+This example uses plain HTTP and non-Secure cookies, and that's only acceptable
+for this loopback-only demo where the cluster network is trusted. Production
+needs, at minimum: HTTPS on a stable DNS name reachable by both browser and
+proxy, secure cookies, matching OIDC redirect, issuer and S3 CORS origins,
+reviewed network controls, MFA, backup and restore procedures, and capacity
+planning. This example doesn't implement or test any of that.
 
-## Troubleshooting and costs
+Encrypted Pulumi config and Kubernetes Secrets keep secrets out of the code,
+but Pulumi state, Helm release records, pod environment access and admin APIs
+are still sensitive. Never commit state or secret-bearing output to Git. No
+bootstrap token is created, and the application pods get no AWS provisioning
+permissions.
 
-If the sample is not ready, inspect sanitized worker logs and the blueprint's
-status first. Discovery cannot succeed until the blueprint has created the
-application. Check `authentik.localhost` in the sample pod's hosts file and the
-issuer Service endpoints. Do not bypass issuer, nonce or certificate validation.
-Check private routing, the actual node security group and RDS TLS on database
-errors. On IRSA failures verify the existing IAM OIDC provider, exact service
-account subject and STS connectivity. No static S3 credentials should be added.
+## Troubleshooting
 
-Paid resources include one RDS instance, at least 20 GiB database storage,
-backups, S3 objects/versions/requests and the pre-existing EKS/node/network
-foundation. Check current regional AWS pricing and reconcile the shared budget
-before deploying. This source does not claim a fixed monthly price or free tier.
+- **Sample pod not ready:** check the worker logs (with secrets removed) and
+  the blueprint status first. OIDC discovery can't succeed until the blueprint
+  has created the application. Then check `authentik.localhost` in the sample
+  pod's hosts file and the issuer Service endpoints. Don't work around this by
+  turning off issuer, nonce or certificate checks.
+- **Database errors:** check private routing, the node security group you
+  configured, and RDS TLS.
+- **IRSA errors:** check the cluster's IAM OIDC provider, the exact service
+  account subject, and STS connectivity. Don't add static S3 keys.
+
+## Costs
+
+You pay for one RDS instance, at least 20 GiB of database storage, backups, S3
+objects, versions and requests, plus the EKS cluster, nodes and networking you
+already run. Check current AWS pricing for your region and your own budget
+before deploying. There's no fixed monthly price or free-tier claim here.
 
 ## Cleanup
 
-Stop both port-forwards. Data protection is enabled by default: RDS and the S3
-bucket are Pulumi-protected; RDS also has AWS deletion protection. An ordinary
-destroy therefore refuses to delete persistent data.
+Stop both port-forwards first.
 
-For a known disposable trial, explicitly set `disposable=true` **before initial
-deployment**. This disables those protections, skips the final RDS snapshot and
-allows deletion of S3 versions; then `pulumi destroy` removes owned resources.
-It never deletes the existing EKS/VPC/subnets/OIDC provider.
+Data protection is on by default. Pulumi protects the RDS database and the S3
+bucket, and RDS also has AWS deletion protection turned on, so a plain
+`pulumi destroy` refuses to delete your data.
 
-For retained data, take and verify the backups you require, empty the versioned
-bucket only when authorized, turn off RDS deletion protection and remove Pulumi
-protection deliberately. Keep `disposable=false` and choose a unique
-`finalSnapshotIdentifier` if retaining a final RDS snapshot. Final snapshots incur
-charges until explicitly deleted. This example has not tested backup restoration.
-After cleanup, independently inventory owned RDS instances,
-snapshots/backups, S3 versions, roles/policies and namespace resources.
+**For a throwaway trial,** set `disposable=true` **before the first deploy**.
+That turns off those protections, skips the final RDS snapshot and allows S3
+versions to be deleted. After that, `pulumi destroy` removes everything the
+stack owns. It never touches your existing EKS cluster, VPC, subnets or OIDC
+provider.
 
-## Attribution and support
+**To keep your data,** take and verify the backups you need first. Empty the
+versioned bucket only when you've decided to, turn off RDS deletion protection,
+and remove Pulumi protection on purpose. Leave `disposable=false` and choose a
+unique `finalSnapshotIdentifier` if you want a final RDS snapshot. Final
+snapshots cost money until you delete them. Restoring from backup hasn't been
+tested.
 
-Upstream licenses are preserved under `licenses/`. Authentik core is MIT with
-separate enterprise terms; its Helm chart is GPL-3.0, including the unmodified
-chart source bundled here. Bundled Bitnami/common chart code is Apache-2.0 and
-disabled. oauth2-proxy is MIT. CPython uses PSF terms and Docker Python packaging
-is MIT.
+After cleanup, check by hand that no RDS instances, snapshots or backups, S3
+object versions, IAM roles or policies, or namespace resources owned by this
+stack are left.
+
+## License and attribution
 
 This example's authored code is licensed under the [MIT License](LICENSE) and
 is provided as-is, without warranty or a support commitment. Third-party
-components retain their own licenses and notices.
+components keep their own licenses and notices, which are preserved under
+`licenses/`:
 
-Private reviewers can use this repository's issues for example defects and submit
-pull requests with a description of the change and its impact. Never include
-credentials, state or private logs. Report sensitive findings privately to the
-repository administrators through your organization's approved security channel.
-Product support remains with the upstream projects.
+- Authentik core is MIT, with separate enterprise terms.
+- The Authentik Helm chart is GPL-3.0, including the unmodified chart source
+  bundled here.
+- The bundled Bitnami common chart code is Apache-2.0 and disabled.
+- oauth2-proxy is MIT.
+- CPython uses the PSF license, and the Docker Python packaging is MIT.
 
-Official references:
+## Support and contributing
+
+This repository is private. If you have access, use its Issues to report
+example defects, and send pull requests that explain what you changed and why.
+Never include credentials, state or private logs. Report sensitive security
+findings privately to the repository administrators through your
+organization's security channel. Product support comes from the upstream
+projects.
+
+## Official references
 
 - https://docs.goauthentik.io/install-config/install/kubernetes/
 - https://github.com/goauthentik/helm/tree/authentik-2026.8.5
