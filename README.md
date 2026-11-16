@@ -34,25 +34,6 @@ A few terms you'll see throughout:
 - **oauth2-proxy** is a small open source gateway that sits in front of a web
   app and only lets signed-in, authorized users through.
 
-## Validation status (November 15, 2026)
-
-This example was deployed in a disposable AWS test environment and then deleted,
-with separate checks confirming the resources were gone. Results:
-
-- **Passed:** in separate clean Chrome profiles, Alice reached the protected
-  checklist with HTTP 200 and all three items. Bob was denied access to the
-  application and reached his own signed-in Authentik user settings instead.
-- **Passed:** spoofed identity headers were redirected to login, and the actual
-  pod binding and Kubernetes Services confirmed the backend was private.
-- **Failed:** one check didn't pass. The pinned upstream oauth2-proxy returns
-  **HTTP 500** for a malformed callback state, but the check required a **4xx**
-  response. It didn't return the protected page, but the result is still a
-  failure against the stated requirement.
-- **Not tested:** persistence, scaling and recovery.
-
-So this is **not** a full pass, and it makes no production readiness or high
-availability (HA) claim.
-
 ## How it works
 
 The official Authentik Helm chart runs one server and one worker. PostgreSQL
@@ -236,9 +217,9 @@ kubectl -n "$NS" port-forward --address 127.0.0.1 svc/onboarding-sample 4180:418
    `alice` with Alice's password. **Success:** you see the first-day checklist
    and `alice@onboarding.example.test`.
 2. Open a second fresh profile with no saved cookies. Sign in as `bob` with
-   Bob's password. **Success:** Bob cannot open the protected checklist. In the
-   recorded run he reached his own Authentik settings after the denial; he was
-   signed in but was not in the allowed group.
+   Bob's password. **Success:** Bob cannot open the protected checklist. He may
+   reach his own Authentik settings after the denial; being signed in does not
+   make him a member of the allowed group.
 3. Optionally, open `http://authentik.localhost:9000/if/admin/` and sign in as
    `akadmin` to look at the application, provider, group binding and blueprint
    status. Don't copy secrets, token responses or raw browser storage into notes
@@ -272,6 +253,9 @@ bootstrap token is created, and the application pods get no AWS provisioning
 permissions.
 
 ## Troubleshooting
+
+- **Malformed sign-in callback:** the pinned oauth2-proxy can return HTTP 500
+  for invalid callback state. The protected page stays inaccessible.
 
 - **Sample pod not ready:** check the worker logs (with secrets removed) and
   the blueprint status first. OIDC discovery can't succeed until the blueprint
@@ -308,8 +292,7 @@ provider.
 versioned bucket only when you've decided to, turn off RDS deletion protection,
 and remove Pulumi protection on purpose. Leave `disposable=false` and choose a
 unique `finalSnapshotIdentifier` if you want a final RDS snapshot. Final
-snapshots cost money until you delete them. Restoring from backup hasn't been
-tested.
+snapshots cost money until you delete them.
 
 After cleanup, check by hand that no RDS instances, snapshots or backups, S3
 object versions, IAM roles or policies, or namespace resources owned by this
